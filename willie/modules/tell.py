@@ -12,7 +12,7 @@ import datetime
 import pytz
 import threading
 from willie.tools import Nick
-from willie.module import commands, nickname_commands, rule, priority, example
+from willie.module import commands, nickname_commands, rule, event, priority, example
 
 maximum = 4
 
@@ -97,10 +97,17 @@ def f_remind(bot, trigger):
     if not os.path.exists(bot.tell_filename):
         return
 
+
     if len(tellee) > 20:
         return bot.reply('That nickname is too long.')
     if tellee == bot.nick:
         return bot.reply("I'm here now, you can tell me whatever you want!")
+
+    if bot.privileges[trigger.sender] and tellee in bot.privileges[trigger.sender]:
+        return bot.reply('%s is here right now, %s him yourself.' % (tellee, verb))
+
+    if Nick(teller) == tellee:
+        return bot.say('You can %s yourself that.' % verb)
 
     tz, tformat = get_user_time(bot, tellee)
     timenow = datetime.datetime.now(tz).strftime(tformat)
@@ -117,8 +124,6 @@ def f_remind(bot, trigger):
         response = "I'll pass that on when %s is around." % tellee
 
         bot.reply(response)
-    elif Nick(teller) == tellee:
-        bot.say('You can %s yourself that.' % verb)
     else:
         bot.say("Hey, I'm not as stupid as Monty you know!")
 
@@ -147,6 +152,7 @@ def getReminders(bot, channel, key, tellee):
 
 
 @rule('(.*)')
+@event('JOIN')
 @priority('low')
 def message(bot, trigger):
 
