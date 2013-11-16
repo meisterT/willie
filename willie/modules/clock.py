@@ -128,7 +128,7 @@ def update_user_format(bot, trigger):
 
 
 @commands('channeltz')
-@example('.chantz America/New_York')
+@example('.channeltz America/New_York')
 def update_channel(bot, trigger):
     """
     Set the preferred time zone for the channel.

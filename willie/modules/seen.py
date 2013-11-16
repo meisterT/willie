@@ -17,15 +17,19 @@ from willie.module import commands, rule, priority
 seen_dict = Ddict(dict)
 
 
-def get_user_time(bot, nick):
+def get_user_time(bot, nick, channel = None):
     tz = 'UTC'
-    tformat = None
+    tformat = '%Y-%m-%d %H:%M:%S %Z'
     if bot.db and nick in bot.db.preferences:
-            tz = bot.db.preferences.get(nick, 'tz') or 'UTC'
-            tformat = bot.db.preferences.get(nick, 'time_format')
+        tz = bot.db.preferences.get(nick, 'tz') or 'UTC'
+        tformat = bot.db.preferences.get(nick, 'time_format')
+    elif channel and bot.db and channel in bot.db.preferences:
+        tz = bot.db.preferences.get(channel, 'tz')
+
+    tz = tz.strip()
     if tz not in pytz.all_timezones_set:
         tz = 'UTC'
-    return (pytz.timezone(tz.strip()), tformat or '%Y-%m-%d %H:%M:%S %Z')
+    return pytz.timezone(tz), tformat
 
 
 @commands('seen')
@@ -40,7 +44,7 @@ def seen(bot, trigger):
         channel = seen_dict[nick]['channel']
         message = seen_dict[nick]['message']
 
-        tz, tformat = get_user_time(bot, trigger.nick)
+        tz, tformat = get_user_time(bot, trigger.nick, trigger.sender)
         saw = datetime.datetime.fromtimestamp(timestamp, tz)
         timestamp = saw.strftime(tformat)
 

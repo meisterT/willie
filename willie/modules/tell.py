@@ -71,15 +71,19 @@ def setup(self):
     self.memory['reminders'] = loadReminders(self.tell_filename, self.memory['tell_lock'])
 
 
-def get_user_time(bot, nick):
+def get_user_time(bot, nick, channel = None):
     tz = 'UTC'
-    tformat = None
+    tformat = '%Y-%m-%d %H:%M:%S %Z'
     if bot.db and nick in bot.db.preferences:
-            tz = bot.db.preferences.get(nick, 'tz') or 'UTC'
-            tformat = bot.db.preferences.get(nick, 'time_format')
+        tz = bot.db.preferences.get(nick, 'tz') or 'UTC'
+        tformat = bot.db.preferences.get(nick, 'time_format')
+    elif channel and bot.db and channel in bot.db.preferences:
+        tz = bot.db.preferences.get(channel, 'tz')
+
+    tz = tz.strip()
     if tz not in pytz.all_timezones_set:
         tz = 'UTC'
-    return (pytz.timezone(tz.strip()), tformat or '%Y-%m-%d %H:%M:%S %Z')
+    return pytz.timezone(tz), tformat
 
 
 @commands('tell', 'ask')
@@ -109,7 +113,7 @@ def f_remind(bot, trigger):
     if Nick(teller) == tellee:
         return bot.say('You can %s yourself that.' % verb)
 
-    tz, tformat = get_user_time(bot, tellee)
+    tz, tformat = get_user_time(bot, tellee, trigger.sender)
     timenow = datetime.datetime.now(tz).strftime(tformat)
     if not tellee in (Nick(teller), bot.nick, 'me'):
         bot.memory['tell_lock'].acquire()

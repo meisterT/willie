@@ -167,6 +167,7 @@ def at(bot, trigger):
         bot.reply("Sorry, but I didn't understand your input.")
         return NOLIMIT
     hour, minute, second, tz, message = match.groups()
+    tzi = None
     if not second:
         second = '0'
     if tz:
@@ -186,9 +187,13 @@ def at(bot, trigger):
         tz = bot.db.preferences.get(trigger.nick, 'tz')
         if tz:
             tzi = timezone(tz)
-        else:
-            tzi = timezone('UTC')
-    else:
+
+    if not tzi:
+        channeltz = bot.db.preferences.get(trigger.sender, 'tz')
+        if channeltz and channeltz in all_timezones_set:
+            tzi = timezone(channeltz)
+
+    if not tzi:
         tzi = timezone('UTC')
 
     now = datetime.now(tzi)
@@ -199,7 +204,7 @@ def at(bot, trigger):
 
     if duration < 0:
         duration += 86400
-    create_reminder(bot, trigger, duration, message, timezone('UTC'))
+    create_reminder(bot, trigger, duration, message, tzi)
 
 
 def create_reminder(bot, trigger, duration, message, tz):
