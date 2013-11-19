@@ -11,18 +11,20 @@ import pytz
 import threading
 import itertools
 from collections import deque
-
-
-from willie.tools import Nick
-from willie.module import commands, rule, event, priority, nickname_commands, NOLIMIT
+from willie.tools import Nick, WillieMemory
+from willie.module import commands, rule, event, priority, unblockable, nickname_commands, NOLIMIT
 
 queue_max = 1000
 tformat = '%Y-%m-%d %H:%M'
 
+class ChannelHistory:
+    def __init__(self):
+        self.count = 0
+        self.history = deque( maxlen = queue_max)
+        self.last_seen = WillieMemory()
+
 def setup(self):
-    self.memory['catchup_history'] = deque(maxlen = queue_max)
-    self.memory['catchup_last_seen'] = dict()
-    self.memory['catchup_count'] = 0
+    self.memory['catchup_info'] = WillieMemory()
 
 def get_channel_time(bot, channel):
     tz = 'UTC'
@@ -34,9 +36,14 @@ def get_channel_time(bot, channel):
         tz = 'UTC'
     return pytz.timezone(tz)
 
-def send_history(bot, nick, nMessages):
+def send_history(bot, channel, nick, nMessages):
+    if not channel in bot.memory['catchup_info']:
+        bot.msg(nick, "Sorry, I don't seem to have history for this channel yet")
+        return
 
-    total = bot.memory['catchup_count'];
+    info = bot.memory['catchup_info'][channel]
+
+    total = info.count
     n = min(nMessages, total)
 
     if n < 1:
@@ -44,12 +51,20 @@ def send_history(bot, nick, nMessages):
 
     start = max(0, total - n)
 
-    toSend = list(itertools.islice(bot.memory['catchup_history'], start, total))
+    toSend = list(itertools.islice(info.history, start, total))
 
-    bot.msg(nick, 'Catchup on the last %d Messages:' % (total - start))
+    bot.msg(nick, 'Catchup on the last %d Messages from %s:' % (total - start, channel))
     for r in toSend:
         bot.msg(nick, r)
 
+def track_leave(bot, channel, nick):
+    if not channel.startswith('#'):
+        return
+    if not channel in bot.memory['catchup_info']:
+        return
+
+    info = bot.memory['catchup_info'][channel]
+    info.last_seen[nick] = info.count
 
 
 @commands('catchup')
@@ -70,37 +85,66 @@ def manual_catchup(bot, trigger):
         n = 100
     # send private msg here
 
-    send_history(bot, asker, n)
+    send_history(bot, trigger.sender, asker, n)
+    
 
 
 @rule('(.*)')
 @event('JOIN')
 @priority('low')
+@unblockable
 def join(bot, trigger):
-    missed = 50
-    if trigger.nick in bot.memory['catchup_last_seen']:
-        missed = bot.memory['catchup_count'] - bot.memory['catchup_last_seen'][trigger.nick]
+    # bot joins channel
+    if trigger.nick == bot.nick:
+        bot.memory['catchup_info'][trigger.sender] = ChannelHistory()
+        bot.say("I know the following channels")
+        for c in bot.memory['catchup_info'].keys():
+            bot.say(c)
+        return
 
-    send_history(bot, trigger.nick, missed)
+    if not trigger.sender in bot.memory['catchup_info']:
+        return
+
+    info = bot.memory['catchup_info'][trigger.sender]
+    missed = 50
+    if trigger.nick in info.last_seen:
+        missed = info.count - info.last_seen[trigger.nick]
+
+    send_history(bot, trigger.sender, trigger.nick, missed)
 
 @rule('(.*)')
 @event('PART')
 @event('QUIT')
+@event('KICK')
 @priority('low')
+@unblockable
 def gone(bot, trigger):
-    bot.memory['catchup_last_seen'][trigger.nick] = bot.memory['catchup_count']
+    track_leave(bot, trigger.sender, trigger.nick)
+
+@rule('(.*)')
+@event('KICK')
+@priority('low')
+@unblockable
+def kicked(bot, trigger):
+    nick = Nick(trigger.args[1])
+    track_leave(bot, trigger.sender, nick)
 
 @rule('(.*)')
 @priority('low')
+@unblockable
 def message(bot, trigger):
     if not trigger.sender.startswith('#'):
         return NOLIMIT
-    if trigger.nick == bot.nick:
-        return NOLIMIT
+
+    # race with JOIN?
+    if not trigger.sender in bot.memory['catchup_info']:
+        return
+
+    info = bot.memory['catchup_info'][trigger.sender]
 
     now = datetime.datetime.now(get_channel_time(bot, trigger.sender))
     record = '%s %s: %s' % (now.strftime(tformat), trigger.nick, trigger.group(0));
-    bot.memory['catchup_history'].append(record);
-    bot.memory['catchup_count'] = bot.memory['catchup_count'] + 1
+    info.history.append(record);
+    info.count = len(info.history)
 
     return NOLIMIT
