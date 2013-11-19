@@ -97,9 +97,6 @@ def join(bot, trigger):
     # bot joins channel
     if trigger.nick == bot.nick:
         bot.memory['catchup_info'][trigger.sender] = ChannelHistory()
-        bot.say("I know the following channels")
-        for c in bot.memory['catchup_info'].keys():
-            bot.say(c)
         return
 
     if not trigger.sender in bot.memory['catchup_info']:
