@@ -111,12 +111,19 @@ def join(bot, trigger):
 
 @rule('(.*)')
 @event('PART')
-@event('QUIT')
 @event('KICK')
 @priority('low')
 @unblockable
-def gone(bot, trigger):
+def part(bot, trigger):
     track_leave(bot, trigger.sender, trigger.nick)
+
+@rule('(.*)')
+@event('QUIT')
+@priority('low')
+@unblockable
+def quit(bot, trigger):
+	for channel in bot.memory['catchup_info']:
+		track_leave(bot, channel, trigger.nick)
 
 @rule('(.*)')
 @event('KICK')
