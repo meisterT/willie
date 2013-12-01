@@ -39,12 +39,14 @@ def get_channel_time(bot, channel):
 def send_history(bot, channel, nick, nMessages):
     if not channel in bot.memory['catchup_info']:
         bot.msg(nick, "Sorry, I don't seem to have history for this channel yet")
+        bot.msg(nick, "You have to say .catchup in a channel I am monitoring")
         return
 
     info = bot.memory['catchup_info'][channel]
 
     total = info.count
     n = min(nMessages, total)
+    n = min(n, 250)
 
     if n < 1:
         return
@@ -58,13 +60,26 @@ def send_history(bot, channel, nick, nMessages):
         bot.msg(nick, r)
 
 def track_leave(bot, channel, nick):
-    if not channel.startswith('#'):
-        return
+    print("track_leave %s %s %s" % (bot, channel, nick))
+
     if not channel in bot.memory['catchup_info']:
         return
 
     info = bot.memory['catchup_info'][channel]
     info.last_seen[nick] = info.count
+    print('%s left %s at %d' % (nick, channel, info.count))
+
+
+def get_unseen_count(bot, channel, nick):
+    if not channel in bot.memory['catchup_info']:
+        return None
+
+    info = bot.memory['catchup_info'][channel]
+    if nick in info.last_seen:
+        missed = info.count - info.last_seen[nick]
+        return missed
+
+    return None
 
 
 @commands('catchup')
@@ -74,19 +89,20 @@ def manual_catchup(bot, trigger):
     asker = trigger.nick
 
     n = None
-    nStr = trigger.group(2);
+    nStr = trigger.group(2)
     if nStr:
         try:
             n = int(nStr)
         except ValueError:
             pass
 
+    if not n and trigger.sender.startswith('#'):
+        n = get_unseen_count(bot, trigger.sender, trigger.nick)
+
     if not n:
-        n = 100
-    # send private msg here
+        n = 50
 
     send_history(bot, trigger.sender, asker, n)
-    
 
 
 @rule('(.*)')
@@ -94,8 +110,8 @@ def manual_catchup(bot, trigger):
 @priority('low')
 @unblockable
 def join(bot, trigger):
-    # bot joins channel
-    if trigger.nick == bot.nick:
+    # bot joins channel for the first time?
+    if trigger.nick == bot.nick and not trigger.sender in bot.memory['catchup_info']:
         bot.memory['catchup_info'][trigger.sender] = ChannelHistory()
         return
 
@@ -107,11 +123,10 @@ def join(bot, trigger):
     if trigger.nick in info.last_seen:
         missed = info.count - info.last_seen[trigger.nick]
 
-    send_history(bot, trigger.sender, trigger.nick, missed)
+    #send_history(bot, trigger.sender, trigger.nick, missed)
 
 @rule('(.*)')
 @event('PART')
-@event('KICK')
 @priority('low')
 @unblockable
 def part(bot, trigger):
@@ -121,9 +136,9 @@ def part(bot, trigger):
 @event('QUIT')
 @priority('low')
 @unblockable
-def quit(bot, trigger):
-	for channel in bot.memory['catchup_info']:
-		track_leave(bot, channel, trigger.nick)
+def track_quit(bot, trigger):
+    for channel in bot.memory['catchup_info']:
+        track_leave(bot, channel, trigger.nick)
 
 @rule('(.*)')
 @event('KICK')
@@ -147,8 +162,8 @@ def message(bot, trigger):
     info = bot.memory['catchup_info'][trigger.sender]
 
     now = datetime.datetime.now(get_channel_time(bot, trigger.sender))
-    record = '%s %s: %s' % (now.strftime(tformat), trigger.nick, trigger.group(0));
-    info.history.append(record);
-    info.count = len(info.history)
+    record = '%s %s: %s' % (now.strftime(tformat), trigger.nick, trigger.group(0))
+    info.history.append(record)
+    info.count = info.count + 1
 
     return NOLIMIT
