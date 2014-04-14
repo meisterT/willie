@@ -63,6 +63,7 @@ def track_leave(bot, channel, nick):
     print("track_leave %s %s %s" % (bot, channel, nick))
 
     if not channel in bot.memory['catchup_info']:
+        print("channel not found - ignoring leave")
         return
 
     info = bot.memory['catchup_info'][channel]
