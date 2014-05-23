@@ -29,10 +29,10 @@ def loadReminders(fn, lock):
             line = line.strip().decode('utf8')
             if line:
                 try:
-                    tellee, teller, verb, timenow, msg = line.split('\t', 4)
+                    tellee, teller, verb, timenow, channel, msg = line.split('\t', 4)
                 except ValueError:
                     continue  # @@ hmm
-                result.setdefault(tellee, []).append((teller, verb, timenow, msg))
+                result.setdefault(tellee, []).append((teller, verb, timenow, channel, msg))
         f.close()
     finally:
         lock.release()
@@ -95,6 +95,7 @@ def get_user_time(bot, nick, channel = None):
 def f_remind(bot, trigger):
     """Give someone a message the next time they're seen"""
     teller = trigger.nick
+    channel = trigger.sender
     verb = trigger.group(1)
 
     if not trigger.group(3):
@@ -133,9 +134,9 @@ def f_remind(bot, trigger):
         bot.memory['tell_lock'].acquire()
         try:
             if not tellee in bot.memory['reminders']:
-                bot.memory['reminders'][tellee] = [(teller, verb, timenow, msg)]
+                bot.memory['reminders'][tellee] = [(teller, verb, timenow, channel, msg)]
             else:
-                bot.memory['reminders'][tellee].append((teller, verb, timenow, msg))
+                bot.memory['reminders'][tellee].append((teller, verb, timenow, channel, msg))
         finally:
             bot.memory['tell_lock'].release()
 
@@ -155,13 +156,21 @@ def getReminders(bot, channel, key, tellee):
 
     bot.memory['tell_lock'].acquire()
     try:
-        for (teller, verb, datetime, msg) in bot.memory['reminders'][key]:
+        remaining = []
+
+        for (teller, verb, datetime, tellchannel, msg) in bot.memory['reminders'][key]:
+            if not tellchannel == channel:
+                remaining.append((teller, verb, datetime, tellchannel, msg))
+                continue
+
             if datetime.startswith(today):
                 datetime = datetime[len(today) + 1:]
             lines.append(template % (tellee, datetime, teller, verb, tellee, msg))
 
         try:
             del bot.memory['reminders'][key]
+            if len(remaining) > 0:
+                bot.memory['reminders'][key] = remaining
         except KeyError:
             bot.msg(channel, 'Er...')
     finally:
