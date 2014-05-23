@@ -1,4 +1,4 @@
-# coding=utf-8
+# coding=utf8
 """
 bot.py - Willie IRC Bot
 Copyright 2008, Sean B. Palmer, inamidst.com
@@ -9,6 +9,9 @@ Licensed under the Eiffel Forum License 2.
 
 http://willie.dftba.net/
 """
+from __future__ import unicode_literals
+from __future__ import print_function
+from __future__ import absolute_import
 
 import time
 import imp
@@ -20,11 +23,17 @@ import threading
 
 from datetime import datetime
 from willie import tools
-import irc
-from db import WillieDB
-from tools import (stderr, Nick, PriorityQueue, released,
-                   get_command_regexp)
-import module
+import willie.irc as irc
+from willie.db import WillieDB
+from willie.tools import (stderr, Nick, PriorityQueue, released,
+                   get_command_regexp, iteritems, itervalues)
+import willie.module as module
+if sys.version_info.major >= 3:
+    unicode = str
+    basestring = str
+    py3 = True
+else:
+    py3 = False
 
 
 class Willie(irc.Bot):
@@ -62,9 +71,9 @@ class Willie(irc.Bot):
         self._cap_reqs = dict()
         """A dictionary of capability requests
 
-        Maps the capability name to a tuple of the prefix ('-', '=', or ''),
-        the name of the requesting module, and the function to call if the
-        request is rejected."""
+        Maps the capability name to a list of tuples of the prefix ('-', '=',
+        or ''), the name of the requesting module, and the function to call if
+        the request is rejected."""
 
         self.privileges = dict()
         """A dictionary of channels to their users and privilege levels
@@ -110,15 +119,19 @@ class Willie(irc.Bot):
         self.setup()
 
     class JobScheduler(threading.Thread):
+
         """Calls jobs assigned to it in steady intervals.
 
-        JobScheduler is a thread that keeps track of Jobs and calls them
-        every X seconds, where X is a property of the Job. It maintains jobs
-        in a priority queue, where the next job to be called is always the
-        first item. Thread safety is maintained with a mutex that is released
-        during long operations, so methods add_job and clear_jobs can be
-        safely called from the main thread.
+        JobScheduler is a thread that keeps track of Jobs and calls them every
+        X seconds, where X is a property of the Job. It maintains jobs in a
+        priority queue, where the next job to be called is always the first
+        item.
+        Thread safety is maintained with a mutex that is released during long
+        operations, so methods add_job and clear_jobs can be safely called from
+        the main thread.
+
         """
+
         min_reaction_time = 30.0  # seconds
         """How often should scheduler checks for changes in the job list."""
 
@@ -202,16 +215,19 @@ class Willie(irc.Bot):
                 self.bot.error()
 
     class Job(object):
-        """
-        Job is a simple structure that hold information about
-        when a function should be called next. They can be put in
-        a priority queue, in which case the Job that should be
-        executed next is returned.
 
-        Calling the method next modifies the Job object for the
-        next time it should be executed. Current time is used to
-        decide when the job should be executed next so it should
-        only be called right after the function was called.
+        """Hold information about when a function should be called next.
+
+        Job is a simple structure that hold information about when a function
+        should be called next.
+        They can be put in a priority queue, in which case the Job that should
+        be executed next is returned.
+
+        Calling the method next modifies the Job object for the next time it
+        should be executed. Current time is used to decide when the job should
+        be executed next so it should only be called right after the function
+        was called.
+
         """
 
         max_catchup = 5
@@ -227,6 +243,7 @@ class Willie(irc.Bot):
             Args:
                 interval: number of seconds between calls to func
                 func: function to be called
+
             """
             self.next_time = time.time() + interval
             self.interval = interval
@@ -236,6 +253,7 @@ class Willie(irc.Bot):
             """Update self.next_time with the assumption func was just called.
 
             Returns: A modified job object.
+
             """
             last_time = self.next_time
             current_time = time.time()
@@ -267,6 +285,7 @@ class Willie(irc.Bot):
 
             Example result:
                 <Job(2013-06-14 11:01:36.884000, 20s, <function upper at 0x02386BF0>)>
+
             """
             iso_time = str(datetime.fromtimestamp(self.next_time))
             return "<Job(%s, %ss, %s)>" % \
@@ -288,10 +307,10 @@ class Willie(irc.Bot):
 
         modules = []
         error_count = 0
-        for name, filename in filenames.iteritems():
+        for name, filename in iteritems(filenames):
             try:
                 module = imp.load_source(name, filename)
-            except Exception, e:
+            except Exception as e:
                 error_count = error_count + 1
                 filename, lineno = tools.get_raising_file_and_line()
                 rel_path = os.path.relpath(filename, os.path.dirname(__file__))
@@ -303,7 +322,7 @@ class Willie(irc.Bot):
                         module.setup(self)
                     self.register(vars(module))
                     modules.append(name)
-                except Exception, e:
+                except Exception as e:
                     error_count = error_count + 1
                     filename, lineno = tools.get_raising_file_and_line()
                     rel_path = os.path.relpath(
@@ -328,6 +347,7 @@ class Willie(irc.Bot):
         Object must be both be callable and have hashable. Furthermore, it must
         have either "commands", "rule" or "interval" as attributes to mark it
         as a willie callable.
+
         """
         if not callable(obj):
             # Check is to help distinguish between willie callables and objects
@@ -344,21 +364,24 @@ class Willie(irc.Bot):
         """Return true if object is a willie shutdown method.
 
         Object must be both be callable and named shutdown.
+
         """
         if (callable(obj) and
-                hasattr(obj, "name")
+                hasattr(obj, "__name__")
                 and obj.__name__ == 'shutdown'):
             return True
         return False
 
     def register(self, variables):
-        """
+        """Register all willie callables.
+
         With the ``__dict__`` attribute from a Willie module, update or add the
         trigger commands and rules, to allow the function to be triggered, and
         shutdown methods, to allow the modules to be notified when willie is
         quitting.
+
         """
-        for obj in variables.itervalues():
+        for obj in itervalues(variables):
             if self.is_callable(obj):
                 self.callables.add(obj)
             if self.is_shutdown(obj):
@@ -373,20 +396,21 @@ class Willie(irc.Bot):
 
         Args:
         variables -- A list of callable objects from a willie module.
+
         """
 
         def remove_func(func, commands):
             """Remove all traces of func from commands."""
-            for func_list in commands.itervalues():
+            for func_list in itervalues(commands):
                 if func in func_list:
                     func_list.remove(func)
 
         hostmask = "%s!%s@%s" % (self.nick, self.user, socket.gethostname())
         willie = self.WillieWrapper(self, irc.Origin(self, hostmask, [], {}))
-        for obj in variables.itervalues():
+        for obj in itervalues(variables):
             if obj in self.callables:
                 self.callables.remove(obj)
-                for commands in self.commands.itervalues():
+                for commands in itervalues(self.commands):
                     remove_func(obj, commands)
             if obj in self.shutdown_methods:
                 try:
@@ -398,11 +422,27 @@ class Willie(irc.Bot):
                     )
                 self.shutdown_methods.remove(obj)
 
+    def sub(self, pattern):
+        """Replace any of the following special directives in a function's rule expression:
+        $nickname -> the bot's nick
+        $nick     -> the bot's nick followed by : or ,
+        """
+        nick = re.escape(self.nick)
+
+        # These replacements have significant order
+        subs = [('$nickname', r'{0}'.format(nick)),
+                ('$nick', r'{0}[,:]\s+'.format(nick)),
+                ]
+        for directive, subpattern in subs:
+            pattern = pattern.replace(directive, subpattern)
+
+        return pattern
+
     def bind_commands(self):
         self.commands = {'high': {}, 'medium': {}, 'low': {}}
         self.scheduler.clear_jobs()
 
-        def bind(self, priority, regexp, func):
+        def bind(priority, regexp, func):
             # Function name is no longer used for anything, as far as I know,
             # but we're going to keep it around anyway.
             if not hasattr(func, 'name'):
@@ -413,13 +453,13 @@ class Willie(irc.Bot):
                 if not doc:
                     return ''
                 lines = doc.expandtabs().splitlines()
-                indent = sys.maxint
+                indent = sys.maxsize
                 for line in lines[1:]:
                     stripped = line.lstrip()
                     if stripped:
                         indent = min(indent, len(line) - len(stripped))
                 trimmed = [lines[0].strip()]
-                if indent < sys.maxint:
+                if indent < sys.maxsize:
                     for line in lines[1:]:
                         trimmed.append(line[indent:].rstrip())
                 while trimmed and not trimmed[-1]:
@@ -443,14 +483,6 @@ class Willie(irc.Bot):
                 if doc or example:
                     self.doc[func.commands[0]] = (doc, example)
             self.commands[priority].setdefault(regexp, []).append(func)
-
-        def sub(pattern, self=self):
-            # These replacements have significant order
-            pattern = pattern.replace(
-                '$nickname', r'%s' %
-                re.escape(self.nick)
-            )
-            return pattern.replace('$nick', r'%s[,:] +' % re.escape(self.nick))
 
         for func in self.callables:
             if not hasattr(func, 'unblockable'):
@@ -480,20 +512,20 @@ class Willie(irc.Bot):
 
                 if isinstance(rules, list):
                     for rule in rules:
-                        pattern = sub(rule)
+                        pattern = self.sub(rule)
                         flags = re.IGNORECASE
                         if rule.find("\n") != -1:
                             flags |= re.VERBOSE
                         regexp = re.compile(pattern, flags)
-                        bind(self, func.priority, regexp, func)
+                        bind(func.priority, regexp, func)
 
                 elif isinstance(func.rule, tuple):
                     # 1) e.g. ('$nick', '(.*)')
                     if len(func.rule) == 2 and isinstance(func.rule[0], str):
                         prefix, pattern = func.rule
-                        prefix = sub(prefix)
+                        prefix = self.sub(prefix)
                         regexp = re.compile(prefix + pattern, re.I)
-                        bind(self, func.priority, regexp, func)
+                        bind(func.priority, regexp, func)
 
                     # 2) e.g. (['p', 'q'], '(.*)')
                     elif len(func.rule) == 2 and \
@@ -505,24 +537,24 @@ class Willie(irc.Bot):
                                 command, pattern
                             )
                             regexp = re.compile(prefix + command, re.I)
-                            bind(self, func.priority, regexp, func)
+                            bind(func.priority, regexp, func)
 
                     # 3) e.g. ('$nick', ['p', 'q'], '(.*)')
                     elif len(func.rule) == 3:
                         prefix, commands, pattern = func.rule
-                        prefix = sub(prefix)
+                        prefix = self.sub(prefix)
                         for command in commands:
                             command = r'(%s) +' % command
                             regexp = re.compile(
                                 prefix + command + pattern, re.I
                             )
-                            bind(self, func.priority, regexp, func)
+                            bind(func.priority, regexp, func)
 
             if hasattr(func, 'commands'):
                 for command in func.commands:
                     prefix = self.config.core.prefix
                     regexp = get_command_regexp(prefix, command)
-                    bind(self, func.priority, regexp, func)
+                    bind(func.priority, regexp, func)
 
             if hasattr(func, 'interval'):
                 for interval in func.interval:
@@ -534,21 +566,37 @@ class Willie(irc.Bot):
             self.bot = willie
             self.origin = origin
 
+        def __dir__(self):
+            classattrs = [attr for attr in self.__class__.__dict__
+                          if not attr.startswith('__')]
+            return list(self.__dict__)+classattrs+dir(self.bot)
+
         def say(self, string, max_messages=1):
             self.bot.msg(self.origin.sender, string, max_messages)
 
-        def reply(self, string):
-            if isinstance(string, str):
+        def reply(self, string, notice=False):
+            if isinstance(string, str) and not py3:
                 string = string.decode('utf8')
-            self.bot.msg(
-                self.origin.sender,
-                u'%s: %s' % (self.origin.nick, string)
-            )
+            if notice:
+                self.notice(
+                    '%s: %s' % (self.origin.nick, string),
+                    self.origin.sender
+                )
+            else:
+                self.bot.msg(
+                    self.origin.sender,
+                    '%s: %s' % (self.origin.nick, string)
+                )
 
         def action(self, string, recipient=None):
             if recipient is None:
                 recipient = self.origin.sender
             self.bot.msg(recipient, '\001ACTION %s\001' % string)
+
+        def notice(self, string, recipient=None):
+            if recipient is None:
+                recipient = self.origin.sender
+            self.write(('NOTICE', recipient), string)
 
         def __getattr__(self, attr):
             return getattr(self.bot, attr)
@@ -556,6 +604,10 @@ class Willie(irc.Bot):
     class Trigger(unicode):
         def __new__(cls, text, origin, bytes, match, event, args, self):
             s = unicode.__new__(cls, text)
+
+            """Is trigger from a channel or in PM"""
+            s.is_privmsg = origin.sender.is_nick()
+
             s.sender = origin.sender
             """
             The channel (or nick, in a private message) from which the
@@ -604,43 +656,24 @@ class Willie(irc.Bot):
 
             If the message had no tags, or the server does not support IRCv3
             message tags, this will be an empty dict."""
-            if len(self.config.core.get_list('admins')) > 0:
-                s.admin = (origin.nick in
-                           [Nick(n) for n in
-                            self.config.core.get_list('admins')])
-            else:
-                s.admin = False
 
+            def match_host_or_nick(pattern):
+                pattern = tools.get_hostmask_regex(pattern)
+                return bool(
+                    pattern.match(origin.nick) or
+                    pattern.match('@'.join((origin.nick, origin.host)))
+                )
+
+            s.admin = any(match_host_or_nick(item)
+                          for item in self.config.core.get_list('admins'))
             """
             True if the nick which triggered the command is in Willie's admin
             list as defined in the config file.
             """
-
-            # Support specifying admins by hostnames
-            if not s.admin and len(self.config.core.get_list('admins')) > 0:
-                for each_admin in self.config.core.get_list('admins'):
-                    re_admin = re.compile(each_admin)
-                    if re_admin.findall(origin.host):
-                        s.admin = True
-                    elif '@' in each_admin:
-                        temp = each_admin.split('@')
-                        re_host = re.compile(temp[1])
-                        if re_host.findall(origin.host):
-                            s.admin = True
-
-            if not self.config.core.owner:
-                s.owner = False
-            elif '@' in self.config.core.owner:
-                s.owner = origin.nick + '@' + \
-                    origin.host == self.config.core.owner
-            else:
-                s.owner = (origin.nick == Nick(self.config.core.owner))
-
-            # Bot owner inherits all the admin rights, therefore is considered
-            # admin
+            s.owner = match_host_or_nick(self.config.core.owner)
             s.admin = s.admin or s.owner
-
             s.host = origin.host
+
             if s.sender is not s.nick:  # no ops in PM
                 s.ops = self.ops.get(s.sender, [])
                 """
@@ -679,6 +712,7 @@ class Willie(irc.Bot):
 
         if not trigger.admin and \
                 not func.unblockable and \
+                func.rate > 0 and \
                 func in self.times[nick]:
             timediff = time.time() - self.times[nick][func]
             if timediff < func.rate:
@@ -703,7 +737,7 @@ class Willie(irc.Bot):
             self.times[nick][func] = time.time()
 
     def limit(self, origin, func):
-        if origin.sender and origin.sender.startswith('#'):
+        if origin.sender and not origin.sender.is_nick():
             if self.config.has_section('limit'):
                 limits = self.config.limit.get(origin.sender)
                 if limits and (func.__module__ not in limits):
@@ -807,6 +841,7 @@ class Willie(irc.Bot):
                 config.verbose which levels are ignored.
 
         Returns: True if message was sent.
+
         """
         if not self.config.core.verbose:
             self.config.core.verbose = 'warning'
@@ -826,7 +861,7 @@ class Willie(irc.Bot):
         }
         if level in output_on and verbosity in output_on[level]:
             if debug_target == 'stdio':
-                print debug_msg
+                print(debug_msg)
             else:
                 self.msg(debug_target, debug_msg)
             return True
@@ -878,7 +913,9 @@ class Willie(irc.Bot):
         request, the `failure_callback` function will be called, if provided.
         The arguments will be a `Willie` object, and the capability which was
         rejected. This can be used to disable callables which rely on the
-        capability."""
+        capability.
+
+        """
         #TODO raise better exceptions
         cap = capability[1:]
         prefix = capability[0]
@@ -901,10 +938,9 @@ class Willie(irc.Bot):
                 raise Exception('Can not change capabilities after server '
                                 'connection has been completed.')
             entry = self._cap_reqs.get(cap, [])
-            if any((ent[0] == '-' for ent in entry)):
+            # Non-mandatory will callback at the same time as if the server
+            # rejected it.
+            if any((ent[0] == '-' for ent in entry)) and prefix == '=':
                 raise Exception('Capability conflict')
             entry.append((prefix, module_name, failure_callback))
             self._cap_reqs[cap] = entry
-
-if __name__ == '__main__':
-    print __doc__

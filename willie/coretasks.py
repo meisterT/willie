@@ -1,6 +1,6 @@
-# coding=utf-8
+# coding=utf8
 """
-coretasks.py - Willie Ruotine Core tasks
+coretasks.py - Willie Routine Core tasks
 Copyright 2008-2011, Sean B. Palmer (inamidst.com) and Michael Yanovich
 (yanovich.net)
 Copyright © 2012, Elad Alfassa <elad@fedoraproject.org>
@@ -13,10 +13,13 @@ This is written as a module to make it easier to extend to support more
 responses to standard IRC codes without having to shove them all into the
 dispatch function in bot.py and making it easier to maintain.
 """
+from __future__ import unicode_literals
+
+
 import re
 import time
 import willie
-from willie.tools import Nick
+from willie.tools import Nick, iteritems
 import base64
 
 
@@ -29,8 +32,9 @@ def rfc1459_startup(bot, trigger):
 
     251 RPL_LUSERCLIENT is a mandatory message that is sent after client
     connects to the server in rfc1459. RFC2812 does not require it and all
-    networks might not send it. This trigger is for those servers that send
-    251 but not 001.
+    networks might not send it. This trigger is for those servers that send 251
+    but not 001.
+
     """
     if not bot.connection_registered:
         startup(bot, trigger)
@@ -43,8 +47,9 @@ def rfc1459_startup(bot, trigger):
 def startup(bot, trigger):
     """Do tasks related to connecting to the network.
 
-    001 RPL_WELCOME is from RFC2812 and is the first message that is sent
-    after the connection has been registered on the network.
+    001 RPL_WELCOME is from RFC2812 and is the first message that is sent after
+    the connection has been registered on the network.
+
     """
     bot.connection_registered = True
 
@@ -61,6 +66,14 @@ def startup(bot, trigger):
             bot.config.core.oper_name + ' ' + bot.config.oper_password
         ))
 
+    #Use Authserv if authserv_password and authserv_account is set in config.
+    if (bot.config.core.authserv_password is not None
+            and bot.config.core.authserv_account is not None):
+        bot.write((
+            'AUTHSERV auth',
+            bot.config.core.authserv_account + ' ' + bot.config.authserv_password
+        ))
+
     #Set bot modes per config, +B if no config option is defined
     if bot.config.has_option('core', 'modes'):
         modes = bot.config.core.modes
@@ -69,17 +82,29 @@ def startup(bot, trigger):
     bot.write(('MODE ', '%s +%s' % (bot.nick, modes)))
 
     bot.memory['retry_join'] = dict()
-    for channel in bot.config.core.get_list('channels'):
-        bot.join(channel)
+
+    if bot.config.has_option('core', 'throttle_join'):
+        throttle_rate = int(bot.config.core.throttle_join)
+        channels_joined = 0
+        for channel in bot.config.core.get_list('channels'):
+            channels_joined += 1
+            if not channels_joined % throttle_rate:
+                time.sleep(1)
+            bot.join(channel)
+    else:
+        for channel in bot.config.core.get_list('channels'):
+            bot.join(channel)
 
 
 @willie.module.event('477')
 @willie.module.rule('.*')
 @willie.module.priority('high')
 def retry_join(bot, trigger):
-    """
+    """Give NickServer enough time to identify on a +R channel.
+
     Give NickServ enough time to identify, and retry rejoining an
     identified-only (+R) channel. Maximum of ten rejoin attempts.
+
     """
     channel = trigger.args[1]
     if channel in bot.memory['retry_join'].keys():
@@ -100,28 +125,33 @@ def retry_join(bot, trigger):
 
 @willie.module.rule('(.*)')
 @willie.module.event('353')
+@willie.module.priority('high')
 @willie.module.thread(False)
 @willie.module.unblockable
 def handle_names(bot, trigger):
-    ''' Handle NAMES response, happens when joining to channels'''
-    names = re.split(' ', trigger)
+    """Handle NAMES response, happens when joining to channels."""
+    names = trigger.split()
+
+    #TODO specific to one channel type. See issue 281.
     channels = re.search('(#\S*)', bot.raw)
-    if (channels is None):
+    if not channels:
         return
-    channel = channels.group(1)
+    channel = Nick(channels.group(1))
     if channel not in bot.privileges:
         bot.privileges[channel] = dict()
     bot.init_ops_list(channel)
+
+    # This could probably be made flexible in the future, but I don't think
+    # it'd be worth it.
+    mapping = {'+': willie.module.VOICE,
+               '%': willie.module.HALFOP,
+               '@': willie.module.OP,
+               '&': willie.module.ADMIN,
+               '~': willie.module.OWNER}
+
     for name in names:
         priv = 0
-        # This could probably be made flexible in the future, but I don't think
-        # it'd be worht it.
-        mapping = {'+': willie.module.VOICE,
-                   '%': willie.module.HALFOP,
-                   '@': willie.module.OP,
-                   '&': willie.module.ADMIN,
-                   '~': willie.module.OWNER}
-        for prefix, value in mapping.iteritems():
+        for prefix, value in iteritems(mapping):
             if prefix in name:
                 priv = priv | value
         nick = Nick(name.lstrip(''.join(mapping.keys())))
@@ -142,64 +172,22 @@ def handle_names(bot, trigger):
 
 @willie.module.rule('(.*)')
 @willie.module.event('MODE')
+@willie.module.priority('high')
+@willie.module.thread(False)
 @willie.module.unblockable
 def track_modes(bot, trigger):
-    ''' Track usermode changes and keep our lists of ops up to date '''
-    line = trigger.args
+    """Track usermode changes and keep our lists of ops up to date."""
+    # Mode message format: <channel> *( ( "-" / "+" ) *<modes> *<modeparams> )
+    channel = Nick(trigger.args[0])
+    line = trigger.args[1:]
 
     # If the first character of where the mode is being set isn't a #
     # then it's a user mode, not a channel mode, so we'll ignore it.
-    if line[0][0] != '#':
+    if channel.is_nick():
         return
-    channel, mode_sec = line[:2]
-    nicks = [Nick(n) for n in line[2:]]
 
-    # Break out the modes, because IRC allows e.g. MODE +aB-c foo bar baz
-    sign = ''
-    modes = []
-    for char in mode_sec:
-        if char == '+' or char == '-':
-            sign = char
-        else:
-            modes.append(sign + char)
-
-    # Some basic checks for broken replies from server. Probably unnecessary.
-    if len(modes) > len(nicks):
-        bot.debug(
-            __file__,
-            'MODE recieved from server with more modes than nicks.',
-            'warning'
-        )
-        modes = modes[:(len(nicks) + 1)]  # Try truncating, in case that works.
-    elif len(modes) < len(nicks):
-        bot.debug(
-            __file__,
-            'MODE recieved from server with more nicks than modes.',
-            'warning'
-        )
-        nicks = nicks[:(len(modes) - 1)]  # Try truncating, in case that works.
-    # This one is almost certainly unneeded.
-    if not (len(modes) and len(nicks)):
-        bot.debug(
-            __file__,
-            'MODE recieved from server without arguments',
-            'verbose'
-        )
-        return  # Nothing to do here.
-
-    mapping = {'v': willie.module.VOICE,
-               'h': willie.module.HALFOP,
-               'o': willie.module.OP,
-               'a': willie.module.ADMIN,
-               'q': willie.module.OWNER}
-    for nick, mode in zip(nicks, modes):
-        priv = bot.privileges[channel].get(nick) or 0
-        value = mapping.get(mode[1])
-        if value is not None:
-            priv = priv | value
-            bot.privileges[channel][nick] = priv
-
-        #Old mode maintenance
+    def handle_old_modes(nick, mode):
+        #Old mode maintenance. Drop this crap in 5.0.
         if mode[1] == 'o' or mode[1] == 'q' or mode[1] == 'a':
             if mode[0] == '+':
                 bot.add_op(channel, nick)
@@ -216,12 +204,47 @@ def track_modes(bot, trigger):
             else:
                 bot.del_voice(channel, nick)
 
+    mapping = {'v': willie.module.VOICE,
+               'h': willie.module.HALFOP,
+               'o': willie.module.OP,
+               'a': willie.module.ADMIN,
+               'q': willie.module.OWNER}
+
+    modes = []
+    for arg in line:
+        if len(arg) == 0:
+            continue
+        if arg[0] in '+-':
+            # There was a comment claiming IRC allows e.g. MODE +aB-c foo, but
+            # I don't see it in any RFCs. Leaving in the extra parsing for now.
+            sign = ''
+            modes = []
+            for char in arg:
+                if char == '+' or char == '-':
+                    sign = char
+                else:
+                    modes.append(sign + char)
+        else:
+            arg = Nick(arg)
+            for mode in modes:
+                priv = bot.privileges[channel].get(arg, 0)
+                value = mapping.get(mode[1])
+                if value is not None:
+                    if mode[0] == '+':
+                        priv = priv | value
+                    else:
+                        priv = priv & ~value
+                    bot.privileges[channel][arg] = priv
+                handle_old_modes(arg, mode)
+
 
 @willie.module.rule('.*')
 @willie.module.event('NICK')
+@willie.module.priority('high')
+@willie.module.thread(False)
 @willie.module.unblockable
 def track_nicks(bot, trigger):
-    '''Track nickname changes and maintain our chanops list accordingly'''
+    """Track nickname changes and maintain our chanops list accordingly."""
     old = trigger.nick
     new = Nick(trigger)
 
@@ -243,6 +266,7 @@ def track_nicks(bot, trigger):
         return
 
     for channel in bot.privileges:
+        channel = Nick(channel)
         if old in bot.privileges[channel]:
             value = bot.privileges[channel].pop(old)
             bot.privileges[channel][new] = value
@@ -264,17 +288,24 @@ def track_nicks(bot, trigger):
 
 @willie.module.rule('(.*)')
 @willie.module.event('PART')
+@willie.module.priority('high')
+@willie.module.thread(False)
 @willie.module.unblockable
 def track_part(bot, trigger):
     if trigger.nick == bot.nick:
         bot.channels.remove(trigger.sender)
         del bot.privileges[trigger.sender]
     else:
-        del bot.privileges[trigger.sender][trigger.nick]
+        try:
+            del bot.privileges[trigger.sender][trigger.nick]
+        except KeyError:
+            pass
 
 
 @willie.module.rule('.*')
 @willie.module.event('KICK')
+@willie.module.priority('high')
+@willie.module.thread(False)
 @willie.module.unblockable
 def track_kick(bot, trigger):
     nick = Nick(trigger.args[1])
@@ -282,11 +313,19 @@ def track_kick(bot, trigger):
         bot.channels.remove(trigger.sender)
         del bot.privileges[trigger.sender]
     else:
-        del bot.privileges[trigger.sender][nick]
+        # Temporary fix to stop KeyErrors from being sent to channel
+        # The privileges dict may not have all nicks stored at all times
+        # causing KeyErrors
+        try:
+            del bot.privileges[trigger.sender][nick]
+        except KeyError:
+            pass
 
 
 @willie.module.rule('.*')
 @willie.module.event('JOIN')
+@willie.module.priority('high')
+@willie.module.thread(False)
 @willie.module.unblockable
 def track_join(bot, trigger):
     if trigger.nick == bot.nick and trigger.sender not in bot.channels:
@@ -297,6 +336,8 @@ def track_join(bot, trigger):
 
 @willie.module.rule('.*')
 @willie.module.event('QUIT')
+@willie.module.priority('high')
+@willie.module.thread(False)
 @willie.module.unblockable
 def track_quit(bot, trigger):
     for chanprivs in bot.privileges.values():
@@ -343,16 +384,26 @@ def recieve_cap_ls_reply(bot, trigger):
     if 'multi-prefix' not in bot._cap_reqs:
         # Whether or not the server supports multi-prefix doesn't change how we
         # parse it, so we don't need to worry if it fails.
-        bot._cap_reqs['multi-prefix'] = ['', 'coretasks', None]
+        bot._cap_reqs['multi-prefix'] = (['', 'coretasks', None],)
 
-    for cap, req in bot._cap_reqs.iteritems():
+    for cap, reqs in iteritems(bot._cap_reqs):
+        # At this point, we know mandatory and prohibited don't co-exist, but
+        # we need to call back for optionals if they're also prohibited
+        prefix = ''
+        for entry in reqs:
+            if prefix == '-' and entry[0] != '-':
+                entry[2](bot, entry[0] + cap)
+                continue
+            if entry[0]:
+                prefix = entry[0]
+
         # It's not required, or it's supported, so we can request it
-        if req[0] != '=' or cap in bot.server_capabilities:
+        if prefix != '=' or cap in bot.server_capabilities:
             # REQs fail as a whole, so we send them one capability at a time
-            bot.write(('CAP', 'REQ', req[0] + cap))
+            bot.write(('CAP', 'REQ', entry[0] + cap))
         elif req[2]:
             # Server is going to fail on it, so we call the failure function
-            req[2](bot, req[0] + cap)
+            req[2](bot, entry[0] + cap)
 
     # If we want to do SASL, we have to wait before we can send CAP END. So if
     # we are, wait on 903 (SASL successful) to send it.
@@ -378,7 +429,12 @@ def auth_proceed(bot, trigger):
         # How did we get here? I am not good with computer.
         return
     # Is this right?
-    sasl_token = '\0'.join((bot.nick, bot.nick, bot.config.core.sasl_password))
+    if bot.config.core.sasl_username:
+        sasl_username = bot.config.core.sasl_username
+    else:
+        sasl_username = bot.nick
+    sasl_token = '\0'.join((sasl_username, sasl_username,
+                           bot.config.core.sasl_password))
     # Spec says we do a base 64 encode on the SASL stuff
     bot.write(('AUTHENTICATE', base64.b64encode(sasl_token)))
 
@@ -397,9 +453,10 @@ def sasl_success(bot, trigger):
 @willie.module.thread(False)
 @willie.module.unblockable
 def blocks(bot, trigger):
-    """
-    Manage Willie's blocking features.
+    """Manage Willie's blocking features.
+
     https://github.com/embolalia/willie/wiki/Making-Willie-ignore-people
+
     """
     if not trigger.admin:
         return

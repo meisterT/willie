@@ -1,4 +1,4 @@
-# -*- coding: utf8 -*-
+# coding=utf8
 """
 seen.py - Willie Seen Module
 Copyright 2008, Sean B. Palmer, inamidst.com
@@ -7,16 +7,17 @@ Licensed under the Eiffel Forum License 2.
 
 http://willie.dftba.net
 """
+from __future__ import unicode_literals
 
 import time
 import datetime
-import pytz
-from willie.tools import Ddict, Nick
+from willie.tools import Ddict, Nick, get_timezone, format_time
 from willie.module import commands, rule, priority
 
 seen_dict = Ddict(dict)
 
 
+<<<<<<< HEAD
 def get_user_time(bot, nick, channel = None):
     tz = 'UTC'
     tformat = '%Y-%m-%d %H:%M:%S %Z'
@@ -57,7 +58,7 @@ def seen(bot, trigger):
 @rule('(.*)')
 @priority('low')
 def note(bot, trigger):
-    if trigger.sender.startswith('#'):
+    if not trigger.is_privmsg:
         nick = Nick(trigger.nick)
         seen_dict[nick]['timestamp'] = time.time()
         seen_dict[nick]['channel'] = trigger.sender

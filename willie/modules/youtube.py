@@ -1,8 +1,8 @@
-# -*- coding: utf8 -*-
+# coding=utf8
 """
 youtube.py - Willie YouTube Module
 Copyright 2012, Dimitri Molenaars, Tyrope.nl.
-Copyright © 2012-2013, Elad Alfassa, <elad@fedoraproject.org>
+Copyright © 2012-2014, Elad Alfassa, <elad@fedoraproject.org>
 Copyright 2012, Edward Powell, embolalia.net
 Licensed under the Eiffel Forum License 2.
 
@@ -10,13 +10,17 @@ http://willie.dfbta.net
 
 This module will respond to .yt and .youtube commands and searches the youtubes.
 """
+from __future__ import unicode_literals
 
 from willie import web, tools
 from willie.module import rule, commands, example
 import json
 import re
-from HTMLParser import HTMLParser
-
+import sys
+if sys.version_info.major < 3:
+    from HTMLParser import HTMLParser
+else:
+    from html.parser import HTMLParser
 
 def setup(bot):
     regex = re.compile('(youtube.com/watch\S*v=|youtu.be/)([\w-]+)')
@@ -26,16 +30,16 @@ def setup(bot):
 
 
 def ytget(bot, trigger, uri):
+    bytes = web.get(uri)
+    result = json.loads(bytes)
     try:
-        bytes = web.get(uri)
-        result = json.loads(bytes)
         if 'feed' in result:
             video_entry = result['feed']['entry'][0]
         else:
             video_entry = result['entry']
-    except:
-        bot.say('Something went wrong when accessing the YouTube API.')
-        return 'err'
+    except KeyError:
+        return {'link': 'N/A'}  # Empty result
+
     vid_info = {}
     try:
         # The ID format is tag:youtube.com,2008:video:RYlCVwxoL_g
@@ -126,8 +130,7 @@ def ytsearch(bot, trigger):
     #modified from ytinfo: Copyright 2010-2011, Michael Yanovich, yanovich.net, Kenneth Sham.
     if not trigger.group(2):
         return
-    uri = 'http://gdata.youtube.com/feeds/api/videos?v=2&alt=json&max-results=1&q=' + trigger.group(2).encode('utf-8')
-    uri = uri.replace(' ', '+')
+    uri = 'https://gdata.youtube.com/feeds/api/videos?v=2&alt=json&max-results=1&q=' + trigger.group(2)
     video_info = ytget(bot, trigger, uri)
 
     if video_info is 'err':
@@ -153,7 +156,7 @@ def ytinfo(bot, trigger, found_match=None):
     """
     match = found_match or trigger
     #Grab info from YT API
-    uri = 'http://gdata.youtube.com/feeds/api/videos/' + match.group(2) + '?v=2&alt=json'
+    uri = 'https://gdata.youtube.com/feeds/api/videos/' + match.group(2) + '?v=2&alt=json'
 
     video_info = ytget(bot, trigger, uri)
     if video_info is 'err':
@@ -177,7 +180,7 @@ def ytinfo(bot, trigger, found_match=None):
 def ytlast(bot, trigger):
     if not trigger.group(2):
         return
-    uri = 'https://gdata.youtube.com/feeds/api/users/' + trigger.group(2).encode('utf-8') + '/uploads?max-results=1&alt=json&v=2'
+    uri = 'https://gdata.youtube.com/feeds/api/users/' + trigger.group(2) + '/uploads?max-results=1&alt=json&v=2'
     video_info = ytget(bot, trigger, uri)
 
     if video_info is 'err':

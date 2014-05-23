@@ -1,3 +1,4 @@
+# coding=utf8
 """
 remind.py - Willie Reminder Module
 Copyright 2011, Sean B. Palmer, inamidst.com
@@ -5,18 +6,22 @@ Licensed under the Eiffel Forum License 2.
 
 http://willie.dftba.net
 """
+from __future__ import unicode_literals
 
 import os
 import re
 import time
 import threading
 import collections
-from pytz import timezone, all_timezones_set
-import pytz
 import codecs
 from datetime import datetime
 from willie.module import commands, example, NOLIMIT
+import willie.tools
 
+try:
+    import pytz
+except:
+    pytz = None
 
 def filename(self):
     name = self.nick + '-' + self.config.host + '.reminders.db'
@@ -42,19 +47,13 @@ def load_database(name):
 
 def dump_database(name, data):
     f = codecs.open(name, 'w', encoding='utf-8')
-    for unixtime, reminders in data.iteritems():
+    for unixtime, reminders in willie.tools.iteritems(data):
         for channel, nick, message in reminders:
             f.write('%s\t%s\t%s\t%s\n' % (unixtime, channel, nick, message))
     f.close()
 
 
 def setup(bot):
-    #Having a db means pref's exists. Later, we can just use `if bot.db`.
-    if bot.db and not bot.db.preferences.has_columns('tz'):
-        bot.db.preferences.add_columns(['tz'])
-    if bot.db and not bot.db.preferences.has_columns('time_format'):
-        bot.db.preferences.add_columns(['tz'])
-
     bot.rfn = filename(bot)
     bot.rdb = load_database(bot.rfn)
 
@@ -80,43 +79,43 @@ def setup(bot):
     t.start()
 
 scaling = collections.OrderedDict([
-        ('years', 365.25 * 24 * 3600),
-        ('year', 365.25 * 24 * 3600),
-        ('yrs', 365.25 * 24 * 3600),
-        ('y', 365.25 * 24 * 3600),
+    ('years', 365.25 * 24 * 3600),
+    ('year', 365.25 * 24 * 3600),
+    ('yrs', 365.25 * 24 * 3600),
+    ('y', 365.25 * 24 * 3600),
 
-        ('months', 29.53059 * 24 * 3600),
-        ('month', 29.53059 * 24 * 3600),
-        ('mo', 29.53059 * 24 * 3600),
+    ('months', 29.53059 * 24 * 3600),
+    ('month', 29.53059 * 24 * 3600),
+    ('mo', 29.53059 * 24 * 3600),
 
-        ('weeks', 7 * 24 * 3600),
-        ('week', 7 * 24 * 3600),
-        ('wks', 7 * 24 * 3600),
-        ('wk', 7 * 24 * 3600),
-        ('w', 7 * 24 * 3600),
+    ('weeks', 7 * 24 * 3600),
+    ('week', 7 * 24 * 3600),
+    ('wks', 7 * 24 * 3600),
+    ('wk', 7 * 24 * 3600),
+    ('w', 7 * 24 * 3600),
 
-        ('days', 24 * 3600),
-        ('day', 24 * 3600),
-        ('d', 24 * 3600),
+    ('days', 24 * 3600),
+    ('day', 24 * 3600),
+    ('d', 24 * 3600),
 
-        ('hours', 3600),
-        ('hour', 3600),
-        ('hrs', 3600),
-        ('hr', 3600),
-        ('h', 3600),
+    ('hours', 3600),
+    ('hour', 3600),
+    ('hrs', 3600),
+    ('hr', 3600),
+    ('h', 3600),
 
-        ('minutes', 60),
-        ('minute', 60),
-        ('mins', 60),
-        ('min', 60),
-        ('m', 60),
+    ('minutes', 60),
+    ('minute', 60),
+    ('mins', 60),
+    ('min', 60),
+    ('m', 60),
 
-        ('seconds', 1),
-        ('second', 1),
-        ('secs', 1),
-        ('sec', 1),
-        ('s', 1),
-        ])
+    ('seconds', 1),
+    ('second', 1),
+    ('secs', 1),
+    ('sec', 1),
+    ('s', 1),
+])
 
 periods = '|'.join(scaling.keys())
 
@@ -145,21 +144,19 @@ def remind(bot, trigger):
         duration = int(duration) + 1
     else:
         duration = int(duration)
-    tzi = timezone('UTC')
-    if bot.db and trigger.nick in bot.db.preferences:
-        tz = bot.db.preferences.get(trigger.nick, 'tz') or 'UTC'
-        tzi = timezone(tz)
-    create_reminder(bot, trigger, duration, reminder, tzi)
+    timezone = willie.tools.get_timezone(
+        bot.db, bot.config, None, trigger.nick, trigger.sender)
+    create_reminder(bot, trigger, duration, reminder, timezone)
 
 
 @commands('at')
 @example('.at 13:47 Do your homework!')
 def at(bot, trigger):
     """
-    Gives you a reminder at the given time. Takes hh:mm:ssContinent/Large_City
-    message. Continent/Large_City is a timezone from the tzdb; a list of valid
-    options is available at http://dft.ba/-tz . The seconds and timezone are
-    optional.
+    Gives you a reminder at the given time. Takes hh:mm:ssTimezone
+    message. Timezone is any timezone Willie takes elsewhere; the best choices
+    are those from the tzdb; a list of valid options is available at
+    http://dft.ba/-tz . The seconds and timezone are optional.
     """
     regex = re.compile(r'(\d+):(\d+)(?::(\d+))?([^\s\d]+)? (.*)')
     match = regex.match(trigger.group(2))
@@ -196,10 +193,6 @@ def at(bot, trigger):
     if not tzi:
         tzi = timezone('UTC')
 
-    now = datetime.now(tzi)
-    timediff = (datetime(now.year, now.month, now.day, int(hour), int(minute),
-                         int(second), tzinfo=now.tzinfo)
-                - now)
     duration = timediff.seconds
 
     if duration < 0:
@@ -218,11 +211,9 @@ def create_reminder(bot, trigger, duration, message, tz):
     dump_database(bot.rfn, bot.rdb)
 
     if duration >= 60:
-        tformat = "%F - %T%Z"
-        if bot.db and trigger.nick in bot.db.preferences:
-            tformat = (bot.db.preferences.get(trigger.nick, 'time_format')
-                       or "%F - %T%Z")
-        timef = datetime.fromtimestamp(t, tz).strftime(tformat)
+        remind_at = datetime.utcfromtimestamp(t)
+        timef = willie.tools.format_time(bot.db, bot.config, tz, trigger.nick,
+                                         trigger.sender, remind_at)
 
         bot.reply('Okay, will remind at %s' % timef)
     else:
