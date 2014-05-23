@@ -10,10 +10,11 @@ from __future__ import unicode_literals
 
 import os
 import time
+import pytz
 import datetime
 import willie.tools
 import threading
-from willie.tools import Nick
+from willie.tools import Nick,iterkeys
 from willie.module import commands, nickname_commands, rule, event, priority, example
 
 maximum = 4

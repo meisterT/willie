@@ -10,6 +10,7 @@ http://willie.dftba.net
 from __future__ import unicode_literals
 
 import time
+import pytz
 import datetime
 from willie.tools import Ddict, Nick, get_timezone, format_time
 from willie.module import commands, rule, priority
