@@ -22,6 +22,7 @@ class ChannelHistory:
         self.count = 0
         self.history = deque( maxlen = queue_max)
         self.last_seen = WillieMemory()
+        self.queue_lock = threading.Lock()
 
 def setup(self):
     self.memory['catchup_info'] = WillieMemory()
@@ -44,31 +45,28 @@ def send_history(bot, channel, nick, nMessages):
 
     info = bot.memory['catchup_info'][channel]
 
-    total = info.count
-    n = min(nMessages, total)
-    n = min(n, 250)
+    total_messages = len(info.history)
+    to_send = min(nMessages, total_messages)
+    start = max(0, total_messages - to_send)
 
-    if n < 1:
-        return
+    messages = [info.history[i] for i in range(start, total_messages)]
 
-    start = max(0, total - n)
-
-    toSend = list(itertools.islice(info.history, start, total))
-
-    bot.msg(nick, 'Catchup on the last %d Messages from %s:' % (total - start, channel))
-    for r in toSend:
+    bot.msg(nick, 'Catchup on the last %d Messages from %s:' % (to_send, channel))
+    for r in messages:
         bot.msg(nick, r)
+
+    #print('nMessages %d, total_messages %d, to_send %d, start %d, messagesLen %d' % (nMessages, total_messages, to_send, start, len(messages)))
 
 def track_leave(bot, channel, nick):
     print("track_leave %s %s %s" % (bot, channel, nick))
 
     if not channel in bot.memory['catchup_info']:
-        print("channel not found - ignoring leave")
+        #print("channel not found - ignoring leave")
         return
 
     info = bot.memory['catchup_info'][channel]
     info.last_seen[nick] = info.count
-    print('%s left %s at %d' % (nick, channel, info.count))
+    #print('%s left %s at %d' % (nick, channel, info.count))
 
 
 def get_unseen_count(bot, channel, nick):
@@ -86,7 +84,7 @@ def get_unseen_count(bot, channel, nick):
 @commands('catchup')
 @nickname_commands('catchup')
 def manual_catchup(bot, trigger):
-    """ .catchup [n]: Manually catch up on the last N messages """
+    """ .catchup [n]: Manually catch up on missed messages OR the last n messages """
     asker = trigger.nick
 
     n = None
@@ -162,9 +160,13 @@ def message(bot, trigger):
 
     info = bot.memory['catchup_info'][trigger.sender]
 
-    now = datetime.datetime.now(get_channel_time(bot, trigger.sender))
-    record = '%s %s: %s' % (now.strftime(tformat), trigger.nick, trigger.group(0))
-    info.history.append(record)
-    info.count = info.count + 1
+    try:
+        info.queue_lock.acquire()
+        now = datetime.datetime.now(get_channel_time(bot, trigger.sender))
+        record = '%s %s: %s' % (now.strftime(tformat), trigger.nick, trigger.group(0))
+        info.history.append(record)
+        info.count = info.count + 1
+    finally:
+        info.queue_lock.release()
 
     return NOLIMIT
