@@ -17,7 +17,6 @@ from willie.module import commands, rule, priority
 seen_dict = Ddict(dict)
 
 
-<<<<<<< HEAD
 def get_user_time(bot, nick, channel = None):
     tz = 'UTC'
     tformat = '%Y-%m-%d %H:%M:%S %Z'
