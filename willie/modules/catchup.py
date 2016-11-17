@@ -10,11 +10,12 @@ import datetime
 import pytz
 import threading
 import itertools
+from time import sleep
 from collections import deque
 from willie.tools import Nick, WillieMemory
 from willie.module import commands, rule, event, priority, unblockable, nickname_commands, NOLIMIT
 
-queue_max = 1000
+queue_max = 10000
 tformat = '%Y-%m-%d %H:%M'
 
 class ChannelHistory:
@@ -53,6 +54,7 @@ def send_history(bot, channel, nick, nMessages):
 
     bot.msg(nick, 'Catchup on the last %d Messages from %s:' % (to_send, channel))
     for r in messages:
+	sleep(0.2) # sleep 0.2 seconds between messages
         bot.msg(nick, r)
 
     #print('nMessages %d, total_messages %d, to_send %d, start %d, messagesLen %d' % (nMessages, total_messages, to_send, start, len(messages)))
